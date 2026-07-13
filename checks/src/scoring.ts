@@ -1,6 +1,6 @@
 /**
  * Scoring: fully public by design. A score you can't audit is a score you
- * shouldn't trust — weights, bands, and caps all live here, in the open.
+ * shouldn't trust - weights, bands, and caps all live here, in the open.
  *
  * Model:
  *  - Each check earns points: pass = 1.0, warn = 0.5, fail = 0.

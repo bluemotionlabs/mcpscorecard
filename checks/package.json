@@ -1,7 +1,7 @@
 {
   "name": "@mcpscorecard/checks",
   "version": "0.1.0",
-  "description": "Open rubric-as-code: the checks and scoring behind the MCP server security scorecard. Each check verifies a numbered section of the MCP Server Security Policy.",
+  "description": "Open scoring model: the checks and scoring behind the MCP server security scorecard. Each check verifies a numbered section of the MCP Server Security Policy.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",

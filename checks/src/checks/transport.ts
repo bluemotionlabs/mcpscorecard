@@ -1,10 +1,10 @@
 /**
- * §3 Authentication & transport hardening — remote servers only.
+ * §3 Authentication & transport hardening - remote servers only.
  *
  * Since the 2025-06-18 spec revision, remote MCP servers are OAuth 2.1
  * resource servers. We check three structural facts, cheapest first:
  * HTTPS (§3.1), auth actually demanded (§3.2), and protected-resource
- * metadata published (§3.3). Local stdio servers get 'info' — they run with
+ * metadata published (§3.3). Local stdio servers get 'info' - they run with
  * host privileges by design, which is §1/§2's problem, not §3's.
  */
 
@@ -34,11 +34,11 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
     policyRef: '§3.1',
     title: 'HTTPS-only endpoint',
     status: parsed.protocol === 'https:' ? 'pass' : 'fail',
-    summary: parsed.protocol === 'https:' ? 'Endpoint uses HTTPS.' : 'Endpoint is plain HTTP — credentials and tool traffic are exposed.',
+    summary: parsed.protocol === 'https:' ? 'Endpoint uses HTTPS.' : 'Endpoint is plain HTTP - credentials and tool traffic are exposed.',
     evidence: [{ label: 'Endpoint', value: url }],
   });
 
-  // §3.2 — does the server demand auth for an unauthenticated MCP request?
+  // §3.2 - does the server demand auth for an unauthenticated MCP request?
   try {
     const res = await fetchWithTimeout(ctx, url, {
       method: 'POST',
@@ -81,7 +81,7 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
     });
   }
 
-  // §3.3 — OAuth 2.1 protected-resource metadata (RFC 9728)
+  // §3.3 - OAuth 2.1 protected-resource metadata (RFC 9728)
   try {
     const wellKnown = `${parsed.origin}/.well-known/oauth-protected-resource`;
     const res = await fetchWithTimeout(ctx, wellKnown);
@@ -101,7 +101,7 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
         policyRef: '§3.3',
         title: 'OAuth protected-resource metadata published',
         status: 'warn',
-        summary: 'No protected-resource metadata found — clients cannot discover the authorization server per spec.',
+        summary: 'No protected-resource metadata found - clients cannot discover the authorization server per spec.',
         evidence: [{ label: 'Checked', value: wellKnown }],
       });
     }

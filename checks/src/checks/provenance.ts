@@ -126,7 +126,7 @@ export async function checkRepoHealth(ctx: CheckContext): Promise<CheckResult> {
     ];
 
     if (repo.archived) {
-      return { ...base, status: 'fail', summary: 'Repository is archived — unmaintained by declaration.', evidence };
+      return { ...base, status: 'fail', summary: 'Repository is archived - unmaintained by declaration.', evidence };
     }
     const problems: string[] = [];
     if (pushedDaysAgo > STALE_PUSH_DAYS) problems.push(`no pushes in ${pushedDaysAgo} days`);

@@ -1,5 +1,5 @@
 /**
- * §1.3 Package integrity — npm registry signals.
+ * §1.3 Package integrity - npm registry signals.
  *
  * Typosquatting an MCP server yields agent-level access, so the package
  * itself is scrutinized: does it match its claimed repo, is it maintained,
@@ -78,7 +78,7 @@ export async function checkPackageHygiene(ctx: CheckContext): Promise<CheckResul
     if (ageDays !== undefined && ageDays < YOUNG_PACKAGE_DAYS) warns.push(`package is only ${ageDays} days old`);
     if (!hasAttestation) warns.push('no npm provenance attestation');
 
-    // Repo mismatch is the typosquat signal — worth more than the softer signals.
+    // Repo mismatch is the typosquat signal - worth more than the softer signals.
     if (repoMatches === false && warns.length >= 2) {
       return { ...base, status: 'fail', summary: `Integrity concerns: ${warns.join('; ')}.`, evidence };
     }

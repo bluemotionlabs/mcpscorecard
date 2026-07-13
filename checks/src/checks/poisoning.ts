@@ -1,10 +1,10 @@
 /**
- * §5 Tool-description integrity — pattern-based tool-poisoning scan.
+ * §5 Tool-description integrity - pattern-based tool-poisoning scan.
  *
  * Tool descriptions are loaded into the model's context and followed, so a
  * poisoned description attacks the agent without the tool ever being called.
  * v1 is deliberately pattern-based (no LLM): patterns below cover the
- * documented attack classes — hidden instructions, invisible Unicode,
+ * documented attack classes - hidden instructions, invisible Unicode,
  * cross-tool shadowing. Patterns are public; a description that merely
  * avoids these exact strings while embedding instructions will still read
  * suspiciously to a human reviewing the evidence we surface.

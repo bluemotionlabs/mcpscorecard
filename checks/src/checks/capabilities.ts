@@ -1,5 +1,5 @@
 /**
- * §2 Capability scope & least privilege — the core check.
+ * §2 Capability scope & least privilege - the core check.
  *
  * The tool surface is obtained WITHOUT ever executing untrusted code:
  *   1. Remote servers: a standard MCP initialize + tools/list over
@@ -7,7 +7,7 @@
  *   2. npm packages: the published tarball is fetched (size-capped,
  *      streamed, never executed) and statically scanned for risk-bearing
  *      capabilities and description strings.
- * If neither source yields anything, the result is 'unverifiable' — which
+ * If neither source yields anything, the result is 'unverifiable' - which
  * the scoring model treats as a finding (grade cap), not a blank.
  */
 
@@ -276,7 +276,7 @@ async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Prom
       total += value.byteLength;
       if (total > cap) {
         await reader.cancel();
-        break; // scan what we have — partial coverage beats none
+        break; // scan what we have - partial coverage beats none
       }
       chunks.push(value);
     }
@@ -293,7 +293,7 @@ async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Prom
   return out;
 }
 
-/** Minimal ustar reader — enough for npm tarballs ("package/..." paths). */
+/** Minimal ustar reader - enough for npm tarballs ("package/..." paths). */
 function* iterateTar(bytes: Uint8Array): Generator<{ name: string; data: Uint8Array }> {
   let offset = 0;
   while (offset + 512 <= bytes.length) {

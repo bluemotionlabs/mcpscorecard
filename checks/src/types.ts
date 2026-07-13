@@ -1,5 +1,5 @@
 /**
- * Core types for the MCP server security rubric.
+ * Core types for the MCP server security scoring model.
  * Each CheckResult maps to a numbered section of the MCP Server Security Policy.
  */
 

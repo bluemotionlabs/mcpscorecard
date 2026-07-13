@@ -1,5 +1,5 @@
 /**
- * §4.1 Known vulnerabilities — OSV.dev lookup for the published package.
+ * §4.1 Known vulnerabilities - OSV.dev lookup for the published package.
  * Direct dependencies are deferred to a later version; the package itself
  * is the highest-signal, lowest-noise query.
  */
@@ -41,7 +41,7 @@ export async function checkVulnerabilities(ctx: CheckContext): Promise<CheckResu
     return {
       ...base,
       status: 'fail',
-      summary: `${vulns.length} advisory(ies) on record — review whether the evaluated version is affected.`,
+      summary: `${vulns.length} advisory(ies) on record - review whether the evaluated version is affected.`,
       evidence,
     };
   } catch (err) {

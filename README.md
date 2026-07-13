@@ -11,7 +11,7 @@ The hosted scanner that runs this rubric for you lives at **[mcpscorecard.dev](h
 
 ## Why open
 
-Several MCP scanners exist; none publish how they score. This one does, on purpose. The policy is the "what and why"; the rubric is the "how we verify it" — the same pairing [OpenSSF](https://openssf.org) uses between its framework and its Scorecard checks. If you think a weight is wrong or a check is too blunt, [open an issue](https://github.com/j2abro/mcpscorecard/issues). That is the point.
+Several MCP scanners exist; none publish how they score. This one does, on purpose. The policy is the "what and why"; the rubric is the "how we verify it" — the same pairing [OpenSSF](https://openssf.org) uses between its framework and its Scorecard checks. If you think a weight is wrong or a check is too blunt, [open an issue](https://github.com/bluemotionlabs/mcpscorecard/issues). That is the point.
 
 ## What it checks
 

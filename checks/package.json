@@ -8,7 +8,7 @@
   "types": "src/index.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/j2abro/mcpscorecard.git",
+    "url": "git+https://github.com/bluemotionlabs/mcpscorecard.git",
     "directory": "checks"
   },
   "scripts": {

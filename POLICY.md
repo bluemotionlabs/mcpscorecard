@@ -11,7 +11,7 @@ Excellent general guidance on MCP security already exists — the official speci
 This policy fills that gap. It is:
 
 - **Scored.** Each section rolls up into a 0–100 score and A–F grade, so "how risky is this server?" has a legible answer, not a reading assignment.
-- **Tool-verifiable.** Every requirement marked *Verified by* is checked automatically by the companion open-source rubric ([`@mcpscorecard/checks`](https://github.com/j2abro/mcpscorecard)), which implements this policy check-for-check. Requirements marked *Manual* state exactly what a human reviewer must confirm.
+- **Tool-verifiable.** Every requirement marked *Verified by* is checked automatically by the companion open-source rubric ([`@mcpscorecard/checks`](https://github.com/bluemotionlabs/mcpscorecard)), which implements this policy check-for-check. Requirements marked *Manual* state exactly what a human reviewer must confirm.
 - **Grounded in the canon, not competing with it.** Each section cites the authorities it operationalizes. Where standards are still emerging (NIST's COSAiS control overlays for AI agent systems, targeted 2026–27), this policy anticipates them.
 
 **Threat context.** This is not theoretical. Between January and February 2026, researchers filed 30+ CVEs against MCP servers, clients, and infrastructure — the most severe (CVE-2025-6514, CVSS 9.6) affecting 437,000+ installed environments. Palo Alto Unit 42 measured a 78.3% attack success rate against an agent connected to five MCP servers. Documented in-the-wild attacks include a malicious MCP server that impersonated a legitimate email tool to exfiltrate customer data.
@@ -103,7 +103,7 @@ Each section below contains requirements evaluated as **pass / warn / fail / unv
 ## Using this policy
 
 - **Self-serve verification:** run any server through the companion scorecard tool at [mcpscorecard.dev](https://mcpscorecard.dev) — it executes every *Verified by* check above and links each finding back to its section here.
-- **The open rubric:** the exact logic, weights, and thresholds are public at [github.com/j2abro/mcpscorecard](https://github.com/j2abro/mcpscorecard).
+- **The open rubric:** the exact logic, weights, and thresholds are public at [github.com/bluemotionlabs/mcpscorecard](https://github.com/bluemotionlabs/mcpscorecard).
 - <!-- TODO (author pass): consulting CTA — deeper review, custom policy adoption, remediation. -->
 
 *Maintained by <!-- TODO: byline / bluemotionlabs.com -->. This document reflects the maintainer's professional judgment, informed by the cited sources; it is an evaluation framework, not compliance assurance.*

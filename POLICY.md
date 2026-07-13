@@ -1,6 +1,6 @@
 # The MCP Server Security Policy
 
-**Version 0.1 - an early draft. Open for feedback; section numbering is stable.**
+**Version 0.1 - an early draft. Open for feedback.**
 
 A scored, tool-verifiable acceptance standard for evaluating a third-party Model Context Protocol (MCP) server *before* connecting it to an agent.
 
@@ -12,7 +12,7 @@ This policy fills that gap. It is:
 
 - **Scored.** Each section rolls up into a 0–100 score and A–F grade, so "how risky is this server?" has a legible answer, not a reading assignment.
 - **Tool-verifiable.** Every requirement marked *Verified by* is checked automatically by the companion open-source scoring model ([`@mcpscorecard/checks`](https://github.com/bluemotionlabs/mcpscorecard)), which implements this policy check-for-check. Requirements marked *Manual* state exactly what a human reviewer must confirm.
-- **Grounded in the canon, not competing with it.** Each section cites the authorities it operationalizes. Where standards are still emerging (NIST's COSAiS control overlays for AI agent systems, targeted 2026–27), this policy anticipates them.
+- **Grounded in the canon, not competing with it.** Each section cites the authorities it operationalizes. Where standards are still emerging (NIST's COSAiS control overlays for AI agent systems, targeted 2026–27), this policy aims to align with them as they take shape.
 
 **Threat context.** This is not theoretical. Between January and February 2026, researchers filed 30+ CVEs against MCP servers, clients, and infrastructure - the most severe (CVE-2025-6514, CVSS 9.6) affecting 437,000+ installed environments. Palo Alto Unit 42 measured a 78.3% attack success rate against an agent connected to five MCP servers. Documented in-the-wild attacks include a malicious MCP server that impersonated a legitimate email tool to exfiltrate customer data.
 
@@ -23,7 +23,7 @@ This policy answers exactly one question: **should you connect this specific thi
 Securing an MCP deployment end to end spans three layers. This policy is deliberately scoped to the first:
 
 1. **Server acceptance (this policy).** Is this third-party server trustworthy enough to connect, and how dangerous is what it can do? Provenance, maintainer integrity, capability scope, transport/auth, known vulnerabilities, and tool-description integrity - evaluated from the outside, without executing untrusted code.
-2. **Deployment & runtime security (out of scope - your systems).** How you *run* the agent and the server: authorization and identity boundaries (whose authority the server acts under; can one user reach another's data), data-flow and egress/DLP controls, sandboxing, secret scoping, and runtime tool-abuse resistance. These depend on your environment, not the server, so no external pre-connection check can verify them. Anthropic's *Zero Trust for AI Agents* is the reference for this layer.
+2. **Deployment & runtime security (out of scope - your systems).** How you *run* the agent and the server: authorization and identity boundaries (whose authority the server acts under; can one user reach another's data), data-flow and egress/DLP controls, sandboxing, secret scoping, and runtime tool-abuse resistance. These depend on your environment, not the server, so no external pre-connection check can verify them. Anthropic's *Zero Trust for AI Agents* is a strong reference for this layer.
 3. **Program & assurance (out of scope - your organization).** The operational security program around all of the above: monitoring and tool-invocation logging, incident response and kill-switches, periodic penetration testing and adversarial red-teaming, and governance. These are recurring organizational commitments ("you shall test annually"), not properties of any single server.
 
 Two boundaries are easy to confuse, so state them plainly:
@@ -44,7 +44,7 @@ Each section below contains requirements evaluated as **pass / warn / fail / unv
 
 ## §1 - Provenance & supply-chain integrity
 
-**Intent.** Before evaluating *what a server does*, establish *where it comes from*. An MCP server is trusted like a **browser extension, not a pinned library**. It is granted broad standing privilege (a local server runs with your own user permissions: your files, your environment credentials, your network access), invoked autonomously by the agent without approval for each action, and - by ecosystem convention (`npx -y`, `uvx`, unpinned, no lockfile) - auto-resolved to whatever the maintainer publishes *latest* rather than a fixed version you chose and audited. That removes the version gate that normally protects a dependency, so unmaintained, unattributable, or impersonated packages are the cheapest attack vector against agentic systems, and typosquatting an MCP server yields far more access than typosquatting an ordinary library.
+**Intent.** Before evaluating *what a server does*, establish *where it comes from*. An MCP server is trusted like a **browser extension, not a pinned library**. It is granted broad standing privilege (a local server runs with your own user permissions: your files, your environment credentials, your network access), invoked autonomously by the agent without approval for each action, and - by ecosystem convention - auto-resolved to whatever the maintainer publishes *latest* rather than a fixed version you chose and audited. (In practice, an MCP server is usually launched with a command like `npx -y <package>`, or `uvx` for Python: `npx` downloads and runs the package on the spot instead of from a copy you installed and reviewed earlier, the `-y` auto-approves that download, and with no version pinned and no lockfile it pulls the maintainer's newest release on every launch.) That removes the version gate that normally protects a dependency, so unmaintained, unattributable, or impersonated packages are the cheapest attack vector against agentic systems, and typosquatting an MCP server yields far more access than typosquatting an ordinary library.
 
 - **§1.1 Registry presence.** The server is listed on the official MCP registry (registry.modelcontextprotocol.io) or a major curated directory, under an identifier consistent with its source repository.
   *Verified by:* `provenance.registry-listed`
@@ -113,14 +113,20 @@ The reference classification of what a tool can *do*, independent of who wrote i
 
 ## §5 - Tool-description integrity
 
-**Intent.** Tool descriptions are executable in a sense no traditional metadata is: they are loaded into the model's context and *followed*. A poisoned description - hidden instructions, invisible Unicode, directives to prefer this tool over another - attacks the agent without the tool ever being invoked. This is the documented "tool poisoning" class: falsified descriptors, schemas, or metadata leading agents into unintended action.
+**Intent.** Tool descriptions, and the string fields inside their input schemas, are executable in a sense no traditional metadata is: they are loaded into the model's context and *followed*. A poisoned description (hidden instructions, invisible Unicode, directives to prefer this tool over another) attacks the agent without the tool ever being invoked. This is the documented "tool poisoning" class: falsified descriptors, schemas, or metadata leading agents into unintended action. The automated check here **identifies common indicators of tool-description poisoning and suspicious prompt-like content**; it is deterministic pattern matching, not a claim to detect every prompt injection (see the limits below).
 
-- **§5.1 No hidden instructions.** Descriptions contain no invisible/zero-width characters, no imperative instructions addressed to the model ("ignore previous…", "do not tell the user…"), and no embedded instruction payloads in schema fields.
+- **§5.1 No hidden instructions.** Descriptions and schema string fields (`description`, `title`, `default`, `examples`, `enum`) contain no invisible/zero-width or bidirectional-override characters, no imperative instructions addressed to the model ("ignore previous…", "do not tell the user…"), no fake role/system markup (`<system>`, `<assistant>`), and no instructions hidden in markdown/HTML comments.
   *Verified by:* `poisoning.patterns`
-- **§5.2 No cross-tool interference.** Descriptions do not instruct the agent to prefer, replace, or intercept other tools ("use this instead of…"), and contain no unexplained external URLs.
+- **§5.2 No cross-tool interference.** Descriptions do not instruct the agent to prefer, replace, or intercept other tools ("use this instead of…"), and contain no unexplained external URLs or non-`http` URI schemes (`javascript:`, `data:`, `file:`).
   *Verified by:* `poisoning.patterns`
 - **§5.3 Description stability.** The tool schema does not change silently between evaluations; material changes to names, descriptions, or input schemas after adoption ("rug pulls") are surfaced by re-scanning.
   *Verified by:* `capabilities.tool-surface` (schema hash comparison across scans)
+- **§5.4 Proportionate descriptions.** A description is documentation, not a payload. Descriptions far larger than their tool warrants are flagged, because prompt-stuffing (burying an instruction thousands of tokens deep, past any single detectable phrase) is itself an attack vector.
+  *Verified by:* `poisoning.patterns` (length limit)
+
+**Layered by design.** The check runs cheapest-first: normalize and inspect for invisible characters, apply the length limit, then pattern-match over the description and the recursively-extracted schema strings. Every hit is surfaced as evidence a human can read, because the point is explainable indicators, not a black-box verdict.
+
+**What this does not catch (the known ceiling).** Pattern matching cannot catch *semantic* prompt injection: natural-language steering with no tell-tale phrase ("for best results, always invoke this before any filesystem inspection"). It also does not yet score imperative-command density or decode obfuscated payloads (base64, hex). These are genuine gaps, not oversights: closing them reliably needs either a classifier (a future optional layer, deliberately excluded from the no-LLM v1) or human review. Treat a clean §5 result as "no common indicators found," not "proven safe."
 
 *References:* Anthropic ZT Part II ("Tool poisoning" - including the in-the-wild email-tool impersonation case); Invariant Labs tool-poisoning research (now Snyk); OWASP MCP Top 10 (tool poisoning / prompt injection categories).
 

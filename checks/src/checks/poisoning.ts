@@ -1,22 +1,31 @@
 /**
  * §5 Tool-description integrity - pattern-based tool-poisoning scan.
  *
- * Tool descriptions are loaded into the model's context and followed, so a
- * poisoned description attacks the agent without the tool ever being called.
- * v1 is deliberately pattern-based (no LLM): patterns below cover the
- * documented attack classes - hidden instructions, invisible Unicode,
- * cross-tool shadowing. Patterns are public; a description that merely
- * avoids these exact strings while embedding instructions will still read
- * suspiciously to a human reviewing the evidence we surface.
+ * Tool descriptions (and the string fields inside their input schemas) are
+ * loaded into the model's context and followed, so a poisoned description
+ * attacks the agent without the tool ever being called. This is deliberately
+ * pattern-based and deterministic (no LLM): it identifies COMMON INDICATORS
+ * of tool-description poisoning and suspicious prompt-like content, not every
+ * possible injection. Semantic prompt injection (natural-language steering
+ * with no tell-tale phrase) is the known ceiling of any pattern scanner and
+ * is out of scope here by design; see §5 of the policy.
+ *
+ * Layered, cheapest first: length limit (anti-stuffing) -> pattern match over
+ * the description AND recursively-extracted schema string fields. Patterns are
+ * public; a description that merely dodges these exact strings while embedding
+ * instructions will still read suspiciously in the evidence we surface.
  */
 
 import type { CheckResult, Evidence, ToolSurface } from '../types.js';
+
+/** Descriptions above this are flagged as anti-stuffing signal, independent of content. */
+export const MAX_DESCRIPTION_CHARS = 2048;
 
 interface PoisonPattern {
   name: string;
   regex: RegExp;
   severity: 'fail' | 'warn';
-  /** 'description' patterns skip inputSchema JSON (avoids flagging $schema URIs etc.) */
+  /** 'description' patterns skip schema-derived text (avoids flagging $schema URIs etc.) */
   scope?: 'description' | 'all';
 }
 
@@ -49,7 +58,20 @@ export const POISON_PATTERNS: PoisonPattern[] = [
   },
   {
     name: 'pseudo-system markup',
-    regex: /<\/?\s*(system|important|hidden|secret|instructions?)\s*>/i,
+    // fake chat/role/instruction delimiters models may treat as privileged
+    regex: /<\/?\s*(system|assistant|user|important|hidden|secret|instructions?)\s*>/i,
+    severity: 'fail',
+  },
+  {
+    name: 'hidden markup comment',
+    // instructions tucked into an HTML/markdown comment: invisible when rendered
+    regex: /<!--[\s\S]*?(ignore|instead|do not|always|never|system|credential|secret)[\s\S]*?-->/i,
+    severity: 'fail',
+  },
+  {
+    name: 'non-http URI scheme',
+    // javascript:/data:/vbscript: payloads; file: local reads
+    regex: /\b(javascript|data|vbscript|file):[^\s)"']{4,}/i,
     severity: 'fail',
   },
   {
@@ -60,11 +82,37 @@ export const POISON_PATTERNS: PoisonPattern[] = [
   },
 ];
 
+/**
+ * Recursively collect human-readable string fields from a JSON Schema. These
+ * (description/title/examples/default/enum) are surfaced to the model just like
+ * the top-level description, so a payload buried in a nested property counts.
+ */
+export function extractSchemaText(schema: unknown, depth = 0): string[] {
+  if (depth > 8 || schema == null) return [];
+  const out: string[] = [];
+  if (Array.isArray(schema)) {
+    for (const item of schema) out.push(...extractSchemaText(item, depth + 1));
+    return out;
+  }
+  if (typeof schema === 'object') {
+    for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+      if (['description', 'title', 'default'].includes(key) && typeof value === 'string') {
+        out.push(value);
+      } else if (['examples', 'enum'].includes(key) && Array.isArray(value)) {
+        for (const v of value) if (typeof v === 'string') out.push(v);
+      } else if (typeof value === 'object') {
+        out.push(...extractSchemaText(value, depth + 1));
+      }
+    }
+  }
+  return out;
+}
+
 export function checkPoisoning(surface: ToolSurface): CheckResult {
   const base = {
     id: 'poisoning.patterns',
-    policyRef: '§5.1–§5.2',
-    title: 'Tool descriptions free of hidden instructions',
+    policyRef: '§5.1–§5.4',
+    title: 'Tool descriptions free of poisoning indicators',
   };
 
   if (surface.tools.length === 0) {
@@ -78,10 +126,30 @@ export function checkPoisoning(surface: ToolSurface): CheckResult {
 
   const evidence: Evidence[] = [];
   let worst: 'pass' | 'warn' | 'fail' = 'pass';
+  const bump = (severity: 'fail' | 'warn') => {
+    if (severity === 'fail') worst = 'fail';
+    else if (worst === 'pass') worst = 'warn';
+  };
 
   for (const tool of surface.tools) {
-    const descriptionText = [tool.name, tool.description ?? ''].join('\n');
-    const fullText = [descriptionText, JSON.stringify(tool.inputSchema ?? '')].join('\n');
+    const description = tool.description ?? '';
+    const descriptionText = [tool.name, description].join('\n');
+    // Schema-derived strings are surfaced to the model too, so they get scanned
+    // like the description (minus the description-only patterns, e.g. URLs, to
+    // avoid flagging benign $schema/$ref URIs).
+    const schemaText = extractSchemaText(tool.inputSchema).join('\n');
+    const fullText = [descriptionText, schemaText].join('\n');
+
+    // Anti-stuffing: an oversized description is suspicious independent of content
+    // (a payload can be buried thousands of tokens deep, past any single phrase).
+    if (description.length > MAX_DESCRIPTION_CHARS) {
+      evidence.push({
+        label: `${tool.name}: oversized description`,
+        value: `${description.length} chars (limit ${MAX_DESCRIPTION_CHARS})`,
+      });
+      bump('warn');
+    }
+
     for (const pattern of POISON_PATTERNS) {
       const match = pattern.regex.exec(pattern.scope === 'description' ? descriptionText : fullText);
       if (!match) continue;
@@ -89,8 +157,7 @@ export function checkPoisoning(surface: ToolSurface): CheckResult {
         label: `${tool.name}: ${pattern.name}`,
         value: truncate(match[0], 120),
       });
-      if (pattern.severity === 'fail') worst = 'fail';
-      else if (worst === 'pass') worst = 'warn';
+      bump(pattern.severity);
     }
   }
 
@@ -99,8 +166,8 @@ export function checkPoisoning(surface: ToolSurface): CheckResult {
     status: worst,
     summary:
       worst === 'pass'
-        ? `No poisoning patterns found across ${surface.tools.length} tool description(s).`
-        : `${evidence.length} suspicious pattern(s) found in tool descriptions.`,
+        ? `No poisoning indicators found across ${surface.tools.length} tool description(s).`
+        : `${evidence.length} suspicious indicator(s) found in tool descriptions or schemas.`,
     evidence,
   };
 }

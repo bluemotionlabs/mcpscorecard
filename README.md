@@ -21,7 +21,7 @@ Several MCP scanners exist; none publish how they score. This one does, on purpo
 | §2 | Capability scope & least privilege | Tool surface via live `tools/list` or static source analysis - **untrusted code is never executed**; shell, filesystem, egress, and credential access flagged |
 | §3 | Auth & transport hardening | HTTPS, authentication required, OAuth 2.1 resource metadata (June 2025 spec) |
 | §4 | Dependency & vulnerability hygiene | OSV.dev advisory lookup |
-| §5 | Tool-description integrity | Common indicators of tool-description poisoning: hidden instructions, invisible/bidi Unicode, fake role markup, hidden comments, cross-tool shadowing, non-`http` URIs, oversized (stuffed) descriptions; scans schema string fields too; plus tool-schema change ("rug pull") detection |
+| §5 | Server-supplied instruction integrity | Common indicators of poisoning and authority over-reach across every model-facing channel a server supplies (the initialize `instructions` field, tool names/descriptions, schema string fields, `prompts`/`resources` metadata): hidden instructions, invisible/bidi Unicode, fake role markup, hidden comments, credential-priority directives (critical), content-suppression and cross-tool shadowing, non-`http` URIs, oversized (stuffed) text; plus tool-schema change ("rug pull") detection |
 | §6 | Toxic flows (tool combinations) | Manual review steps defined in the policy |
 
 ## Using the scoring model directly

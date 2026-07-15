@@ -17,7 +17,7 @@ This package is the executable half of the **MCP Server Security Policy**: every
 | `transport.auth-required` | §3.2 | Remote server rejects anonymous requests | Unauthenticated probe |
 | `transport.oauth-metadata` | §3.3 | Publishes OAuth protected-resource metadata (June 2025 spec) | `/.well-known` fetch |
 | `vulns.osv` | §4.1 | No known advisories | OSV.dev API |
-| `poisoning.patterns` | §5.1–§5.4 | Common indicators of tool-description poisoning: hidden instructions, invisible/bidi Unicode, fake role markup, hidden comments, cross-tool shadowing, non-`http` URIs, and oversized (stuffed) descriptions. Scans descriptions and schema string fields. | Deterministic pattern analysis (patterns in [`src/checks/poisoning.ts`](src/checks/poisoning.ts)); does not catch semantic injection |
+| `poisoning.patterns` | §5.1–§5.4 | Common indicators of poisoning and over-reach across every server-supplied, model-facing channel: the initialize `instructions` field, tool names/descriptions, schema string fields, and `prompts`/`resources` metadata. Detects hidden instructions, invisible/bidi Unicode, fake role markup, hidden comments, cross-tool shadowing, non-`http` URIs, oversized (stuffed) text, and authority over-reach (credential-priority directives graded critical, content-suppression directives graded warning). | Deterministic pattern analysis (patterns in [`src/checks/poisoning.ts`](src/checks/poisoning.ts)); does not catch semantic injection |
 | *(schema hash)* | §5.3 | Tool surface unchanged since last scan ("rug pull" detection) | SHA-256 over canonicalized tool schemas |
 | *manual* | §2.3, §3.4, §4.2, §6 | Least-privilege judgment, credential handling, toxic tool combinations | Human review - the policy states exactly what to confirm |
 

@@ -15,6 +15,7 @@ import type {
   CheckContext,
   CheckResult,
   Evidence,
+  NamedText,
   RiskCategory,
   RiskHit,
   ToolInfo,
@@ -49,6 +50,9 @@ export async function getToolSurface(ctx: CheckContext): Promise<ToolSurface> {
   if (ctx.target.remoteUrl) {
     const remote = await tryRemoteToolsList(ctx, ctx.target.remoteUrl);
     if (remote.authRequired) surface.remoteAuthRequired = true;
+    if (remote.instructions) surface.serverInstructions = remote.instructions;
+    if (remote.prompts?.length) surface.prompts = remote.prompts;
+    if (remote.resources?.length) surface.resources = remote.resources;
     if (remote.tools) {
       surface.source = 'remote-tools-list';
       surface.tools = remote.tools;
@@ -138,7 +142,13 @@ export function checkCapabilities(surface: ToolSurface): CheckResult {
 async function tryRemoteToolsList(
   ctx: CheckContext,
   url: string,
-): Promise<{ tools?: ToolInfo[]; authRequired?: boolean }> {
+): Promise<{
+  tools?: ToolInfo[];
+  authRequired?: boolean;
+  instructions?: string;
+  prompts?: NamedText[];
+  resources?: NamedText[];
+}> {
   try {
     const initRes = await rpc(ctx, url, undefined, {
       jsonrpc: '2.0',
@@ -153,14 +163,43 @@ async function tryRemoteToolsList(
     if (initRes.status === 401 || initRes.status === 403) return { authRequired: true };
     if (!initRes.ok) return {};
 
+    // The initialize result carries an optional `instructions` string the spec
+    // permits clients to inject into the system prompt - a model-facing surface
+    // that gets poison-scanned like a tool description (§5).
+    const initResult = initRes.body?.result as
+      | { instructions?: unknown; capabilities?: { prompts?: unknown; resources?: unknown } }
+      | undefined;
+    const instructions = typeof initResult?.instructions === 'string' ? initResult.instructions : undefined;
+    const caps = initResult?.capabilities;
+
     const sessionId = initRes.response.headers.get('mcp-session-id') ?? undefined;
     await rpc(ctx, url, sessionId, { jsonrpc: '2.0', method: 'notifications/initialized' }).catch(() => undefined);
 
+    // Prompts and resources also expose server-authored, model-facing text. Only
+    // ask when the server advertised the capability, so we add no calls otherwise.
+    let prompts: NamedText[] | undefined;
+    if (caps?.prompts) {
+      const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 3, method: 'prompts/list' }).catch(() => undefined);
+      const list = (r?.body?.result as { prompts?: Array<{ name?: string; description?: string }> } | undefined)?.prompts;
+      if (list) prompts = list.map((p) => ({ name: p.name ?? '', description: p.description }));
+    }
+    let resources: NamedText[] | undefined;
+    if (caps?.resources) {
+      const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 4, method: 'resources/list' }).catch(() => undefined);
+      const list = (r?.body?.result as { resources?: Array<{ name?: string; description?: string }> } | undefined)?.resources;
+      if (list) resources = list.map((x) => ({ name: x.name ?? '', description: x.description }));
+    }
+
     const listRes = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    if (!listRes.ok) return {};
+    if (!listRes.ok) return { instructions, prompts, resources };
     const result = listRes.body?.result as { tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> } | undefined;
-    if (!result?.tools) return {};
-    return { tools: result.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) };
+    if (!result?.tools) return { instructions, prompts, resources };
+    return {
+      tools: result.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+      instructions,
+      prompts,
+      resources,
+    };
   } catch {
     return {};
   }

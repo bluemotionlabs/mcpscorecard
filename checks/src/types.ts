@@ -43,6 +43,12 @@ export interface ToolInfo {
   inputSchema?: unknown;
 }
 
+/** A named, model-facing text item (a prompt or resource entry) carrying a description. */
+export interface NamedText {
+  name: string;
+  description?: string;
+}
+
 /** How the tool list was obtained; "none" means capabilities are unverifiable. */
 export type ToolSource = 'remote-tools-list' | 'registry-metadata' | 'package-source' | 'none';
 
@@ -53,6 +59,14 @@ export interface ToolSurface {
   sourceRiskHits: RiskHit[];
   /** Remote server demanded auth before listing tools (a §3 pass, a §2 fallback) */
   remoteAuthRequired?: boolean;
+  /** Server-provided `instructions` from the MCP initialize response; the spec
+   * lets clients inject this into the system prompt, so it is scanned for
+   * poisoning just like a tool description. */
+  serverInstructions?: string;
+  /** Prompt entries (prompts/list); their names/descriptions are model-facing too. */
+  prompts?: NamedText[];
+  /** Resource entries (resources/list); names/descriptions scanned, URIs left alone. */
+  resources?: NamedText[];
 }
 
 export interface RiskHit {

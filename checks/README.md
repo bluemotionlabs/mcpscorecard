@@ -28,10 +28,11 @@ This package is the executable half of the **MCP Server Security Policy**: every
 - **No execution of untrusted code, ever.** Local/stdio servers are analyzed via their published source only. Remote servers are spoken to over the standard MCP protocol.
 - **No LLM calls in v1.** The §5 scan is pattern-based and the patterns are public. Yes, that means a determined attacker can author around them - the same is true of every closed scanner, which simply hides the same limitation.
 - **Unverifiable ≠ unscored.** A server whose tool surface can't be inspected is capped at grade B. Opacity is risk.
+- **§5 fail → F.** A confirmed instruction-integrity failure forces grade F regardless of other sections.
 
 ## Scoring
 
-See [`src/scoring.ts`](src/scoring.ts) - check weights, pass/warn/fail point values, grade bands, and the unverifiability cap, all in one readable file.
+See [`src/scoring.ts`](src/scoring.ts) - check weights, pass/warn/fail point values, grade bands, the unverifiability cap (max B), and the §5 fail → grade F hard gate, all in one readable file.
 
 ## License
 

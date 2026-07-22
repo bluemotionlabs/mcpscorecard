@@ -8,6 +8,9 @@
  *  - 'unverifiable' results are excluded from the denominator, EXCEPT the
  *    capability check (§2): if the tool surface cannot be inspected at all,
  *    the overall grade is capped at B (Policy: "cannot verify is a finding").
+ *  - A §5 (`poisoning.patterns`) fail forces the overall grade to F, regardless
+ *    of every other section (Policy structural rule #2). The numeric score
+ *    remains the weighted value for auditability; only the letter grade is overridden.
  *  - Check weights reflect policy-section importance (§2 capability scope
  *    dominates: what a server can do matters more than where it's listed).
  */
@@ -36,6 +39,9 @@ export const GRADE_BANDS: Array<{ min: number; grade: Grade }> = [
 
 /** Grade cap applied when the tool surface is unverifiable (Policy §2.1). */
 export const UNVERIFIABLE_CAPABILITY_CAP: Grade = 'B';
+
+/** Grade forced when instruction-integrity (§5) fails (Policy structural rule #2). */
+export const POISONING_FAIL_GRADE: Grade = 'F';
 
 const STATUS_POINTS: Record<string, number | null> = {
   pass: 1,
@@ -67,6 +73,11 @@ export function computeScore(checks: CheckResult[]): { score: number; grade: Gra
   );
   if (capabilityUnverifiable && gradeRank(grade) < gradeRank(UNVERIFIABLE_CAPABILITY_CAP)) {
     grade = UNVERIFIABLE_CAPABILITY_CAP;
+  }
+
+  const poisoningFailed = checks.some((c) => c.id === 'poisoning.patterns' && c.status === 'fail');
+  if (poisoningFailed) {
+    grade = POISONING_FAIL_GRADE;
   }
 
   return { score, grade };

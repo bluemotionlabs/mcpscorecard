@@ -6,12 +6,58 @@
  * HTTPS (§3.1), auth actually demanded (§3.2), and protected-resource
  * metadata published (§3.3). Local stdio servers get 'info' - they run with
  * host privileges by design, which is §1/§2's problem, not §3's.
+ *
+ * §3.2 severity is gated on the §2 capability result (Policy): anonymous access
+ * to a Low/clean surface is warn; anonymous access when capabilities are
+ * Medium+ (warn/fail) or unverifiable is fail.
  */
 
-import type { CheckContext, CheckResult } from '../types.js';
+import type { CheckContext, CheckResult, CheckStatus } from '../types.js';
 import { errMsg, fetchWithTimeout } from './provenance.js';
 
-export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> {
+/** Auth probe outcome before capability gating is applied. */
+export type AuthProbeOutcome =
+  | 'required-with-www-auth'
+  | 'required-no-www-auth'
+  | 'anonymous'
+  | 'unverifiable';
+
+/**
+ * Resolve §3.2 status from the auth probe and the capability check status.
+ * Pure helper so tests do not need network.
+ */
+export function resolveAuthRequiredStatus(
+  authOutcome: AuthProbeOutcome,
+  capabilityStatus: CheckStatus = 'pass',
+): CheckStatus {
+  if (authOutcome === 'required-with-www-auth') return 'pass';
+  if (authOutcome === 'required-no-www-auth') return 'warn';
+  if (authOutcome === 'unverifiable') return 'unverifiable';
+  // anonymous: warn only when the tool surface looks Low/clean (capability pass)
+  if (capabilityStatus === 'pass') return 'warn';
+  return 'fail';
+}
+
+function authSummary(outcome: AuthProbeOutcome, status: CheckStatus, httpStatus?: number): string {
+  if (outcome === 'required-with-www-auth') {
+    return 'Server rejects anonymous requests and advertises its auth scheme.';
+  }
+  if (outcome === 'required-no-www-auth') {
+    return 'Server rejects anonymous requests but sends no WWW-Authenticate header.';
+  }
+  if (outcome === 'unverifiable') {
+    return 'Endpoint unreachable during auth probe.';
+  }
+  if (status === 'fail') {
+    return `Server answers anonymous requests (HTTP ${httpStatus}) while exposing non-trivial or unverifiable capabilities - fail per §3.2.`;
+  }
+  return `Server answers anonymous requests (HTTP ${httpStatus}). Acceptable only for deliberately public, read-only (Low) servers.`;
+}
+
+export async function checkTransport(
+  ctx: CheckContext,
+  capabilityStatus: CheckStatus = 'pass',
+): Promise<CheckResult[]> {
   const url = ctx.target.remoteUrl;
   if (!url) {
     return [
@@ -20,7 +66,8 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
         policyRef: '§3',
         title: 'Transport & authentication',
         status: 'info',
-        summary: 'Local (stdio) server: runs with host-process privileges by design. Transport checks apply to remote servers; scrutiny shifts to §1/§2.',
+        summary:
+          'Local (stdio) server: runs with host-process privileges by design. Transport checks apply to remote servers; scrutiny shifts to §1/§2.',
         evidence: [],
       },
     ];
@@ -34,7 +81,10 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
     policyRef: '§3.1',
     title: 'HTTPS-only endpoint',
     status: parsed.protocol === 'https:' ? 'pass' : 'fail',
-    summary: parsed.protocol === 'https:' ? 'Endpoint uses HTTPS.' : 'Endpoint is plain HTTP - credentials and tool traffic are exposed.',
+    summary:
+      parsed.protocol === 'https:'
+        ? 'Endpoint uses HTTPS.'
+        : 'Endpoint is plain HTTP - credentials and tool traffic are exposed.',
     evidence: [{ label: 'Endpoint', value: url }],
   });
 
@@ -49,27 +99,25 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
       body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'ping' }),
     });
     const wwwAuth = res.headers.get('www-authenticate');
+    let outcome: AuthProbeOutcome;
+    let evidence: CheckResult['evidence'] = [];
+
     if (res.status === 401 || res.status === 403) {
-      results.push({
-        id: 'transport.auth-required',
-        policyRef: '§3.2',
-        title: 'Authentication required',
-        status: wwwAuth ? 'pass' : 'warn',
-        summary: wwwAuth
-          ? 'Server rejects anonymous requests and advertises its auth scheme.'
-          : 'Server rejects anonymous requests but sends no WWW-Authenticate header.',
-        evidence: wwwAuth ? [{ label: 'WWW-Authenticate', value: wwwAuth }] : [],
-      });
+      outcome = wwwAuth ? 'required-with-www-auth' : 'required-no-www-auth';
+      evidence = wwwAuth ? [{ label: 'WWW-Authenticate', value: wwwAuth }] : [];
     } else {
-      results.push({
-        id: 'transport.auth-required',
-        policyRef: '§3.2',
-        title: 'Authentication required',
-        status: 'warn',
-        summary: `Server answers anonymous requests (HTTP ${res.status}). Acceptable only for deliberately public, read-only servers.`,
-        evidence: [],
-      });
+      outcome = 'anonymous';
     }
+
+    const status = resolveAuthRequiredStatus(outcome, capabilityStatus);
+    results.push({
+      id: 'transport.auth-required',
+      policyRef: '§3.2',
+      title: 'Authentication required',
+      status,
+      summary: authSummary(outcome, status, res.status),
+      evidence,
+    });
   } catch (err) {
     results.push({
       id: 'transport.auth-required',
@@ -93,7 +141,10 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
         title: 'OAuth protected-resource metadata published',
         status: 'pass',
         summary: 'Publishes /.well-known/oauth-protected-resource per the June 2025 authorization spec.',
-        evidence: (body.authorization_servers ?? []).map((as) => ({ label: 'Authorization server', value: as })),
+        evidence: (body.authorization_servers ?? []).map((as) => ({
+          label: 'Authorization server',
+          value: as,
+        })),
       });
     } else {
       results.push({
@@ -101,7 +152,8 @@ export async function checkTransport(ctx: CheckContext): Promise<CheckResult[]> 
         policyRef: '§3.3',
         title: 'OAuth protected-resource metadata published',
         status: 'warn',
-        summary: 'No protected-resource metadata found - clients cannot discover the authorization server per spec.',
+        summary:
+          'No protected-resource metadata found - clients cannot discover the authorization server per spec.',
         evidence: [{ label: 'Checked', value: wellKnown }],
       });
     }

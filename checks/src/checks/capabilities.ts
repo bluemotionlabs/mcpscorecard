@@ -78,7 +78,7 @@ export async function getToolSurface(ctx: CheckContext): Promise<ToolSurface> {
 export function checkCapabilities(surface: ToolSurface): CheckResult {
   const base = {
     id: 'capabilities.tool-surface',
-    policyRef: '§2.1–§2.2',
+    policyRef: '§2.1–§2.4',
     title: 'Tool surface is inspectable and proportionate',
   };
 
@@ -114,6 +114,10 @@ export function checkCapabilities(surface: ToolSurface): CheckResult {
   }
 
   const dangerous = categories.has('process-execution');
+  // Policy §2 automation note: credential-access is the detectable proxy for
+  // "read private data"; paired with egress it fails §2 / feeds §6.1.
+  const toxicReadEgress =
+    categories.has('credential-access') && categories.has('network-egress');
   const combo = categories.size;
 
   if (combo === 0) {
@@ -127,12 +131,15 @@ export function checkCapabilities(surface: ToolSurface): CheckResult {
       evidence,
     };
   }
-  // Shell execution, or read+send combinations (§6's toxic-flow precursor), get the strongest flag.
-  const status = dangerous || combo >= 3 ? 'fail' : 'warn';
+
+  const status = dangerous || toxicReadEgress || combo >= 3 ? 'fail' : 'warn';
+  const comboNote = toxicReadEgress
+    ? ' Credential-access combined with network egress is a toxic flow (§2 combination rule / §6.1).'
+    : '';
   return {
     ...base,
     status,
-    summary: `High-risk capabilities detected: ${[...categories].join(', ')}. Verify each is essential to the server's stated purpose (§2.3).`,
+    summary: `High-risk capabilities detected: ${[...categories].join(', ')}. Verify each is essential to the server's stated purpose (§2.3).${comboNote}`,
     evidence,
   };
 }

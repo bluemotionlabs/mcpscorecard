@@ -1,6 +1,6 @@
 # The MCP Server Security Policy
 
-**Version 0.1 - an early draft. Open for feedback.**
+**Version 0.2 - an early draft. Open for feedback.**
 
 A scored, tool-verifiable acceptance standard for evaluating a third-party Model Context Protocol (MCP) server *before* connecting it to an agent.
 
@@ -35,10 +35,11 @@ A grade under this policy is therefore one necessary input to an adoption decisi
 
 ## How scoring works
 
-Each section below contains requirements evaluated as **pass / warn / fail / unverifiable**. Category results roll up into a weighted 0–100 score and letter grade (bands published in the open scoring model). Two structural rules:
+Each section below contains requirements evaluated as **pass / warn / fail / unverifiable**. Category results roll up into a weighted 0–100 score and letter grade (bands published in the open scoring model). Three structural rules:
 
 1. **"Cannot verify" is a finding, not a gap in the report.** A server whose capabilities cannot be inspected (closed source, no reachable tool schema) is capped at grade B regardless of other results. Unverifiability is itself risk signal.
-2. **Weights and thresholds are public.** The full scoring logic lives in the open scoring model repository. Public scoring supports auditable results.
+2. **A §5 fail forces the grade to F, not a cap.** The instruction-integrity check (§5) only reaches `fail` status when a fail-or-critical-severity pattern has matched: a confirmed hidden instruction, concealment directive, credential-priority directive, or spoofed system markup, never from the softer indicators (content-suppression wording, cross-tool nudging, oversized text) alone, which keep the check at `warn`. When §5 fails, the overall grade is F regardless of every other section's result. This is a different kind of rule than the cap above: unverifiability is an absence of evidence, a confirmed §5 fail is direct evidence of the exact behavior this policy exists to catch, and no amount of provenance or transport hygiene offsets that.
+3. **Weights and thresholds are public.** The full scoring logic lives in the open scoring model repository. Public scoring supports auditable results.
 
 ---
 
@@ -54,6 +55,7 @@ Each section below contains requirements evaluated as **pass / warn / fail / unv
   *Verified by:* `provenance.package-hygiene`
 - **§1.4 Maintainer integrity.** Because there is no version gate between you and a compromised maintainer (see intent), *who* controls the code is a first-class signal. Attributable, stable ownership with signed releases; no unexplained maintainer/ownership changes, no sudden new-publisher takeover of an established package, no release anomalies (a long-dormant package publishing abruptly, a version with no corresponding source commit). A compromised maintainer can ship an exfiltrating tool that nothing else in this section would catch.
   *Verified by:* `provenance.maintainer` *(roadmap - specified here, not yet automated)*: commit-signing rate, contributor/owner history, publisher-vs-repo consistency, release cadence anomalies. *Manual* for judgment on ownership transfers.
+- **§1.5 Independent security evidence.** *(Manual, roadmap for automation.)* The server publishes evidence of independent scrutiny: a bug bounty or vulnerability-disclosure program, a completed third-party audit, or a track record of promptly fixing reported issues. This is the acceptance-standard analogue of "get a pentest" described in Scope above: not a property of your program, but a fact about the server you can check before connecting it.
 
 *References:* Anthropic ZT Part II ("Tool and framework supply chain risks" - MCP server as browser-extension-class trust) and Part IV Phase 2 ("Manage supply chain risks" - AI-BOM, dependency vetting, maintainer activity); OWASP MCP Top 10 (supply-chain risk category); NSA MCP guidance (supply-chain considerations); OpenSSF Scorecard (methodological model, incl. signed-releases and maintained checks). <!-- TODO: pin exact OWASP item IDs when Top 10 exits beta -->
 
@@ -64,7 +66,7 @@ Each section below contains requirements evaluated as **pass / warn / fail / unv
 - **§2.1 Inspectable tool surface.** The server's tool schema (names, descriptions, input schemas) is obtainable without executing untrusted code - via a live `tools/list` on remote servers, registry metadata, or public source.
   *Verified by:* `capabilities.tool-surface` (unverifiable ⇒ grade cap, per scoring rules)
 - **§2.2 High-risk capability disclosure.** Tools that execute processes, access the filesystem broadly, make dynamic outbound requests, or read credential material are identified and flagged; their necessity must be evident from the server's stated purpose.
-  *Verified by:* `capabilities.tool-surface` (risk-keyword analysis)
+  *Verified by:* `capabilities.tool-surface` (risk-keyword analysis). Detection fidelity differs by source: a remote server's capabilities are inferred from tool name and description text, which a tool can understate by naming things blandly; an npm package's capabilities are detected from actual source patterns (`child_process`, `fs.writeFileSync`, and similar), a materially stronger signal. Treat a clean remote-server result as "no risk language detected," not "no risk capability exists."
 - **§2.3 Capability minimalism.** *(Manual.)* The tool surface is no broader than the server's purpose requires; risky capabilities are separated rather than bundled into one server.
 - **§2.4 Capability risk classification.** Each tool is classified against the **Capability Risk Matrix** below. A server's capability-risk level is that of its highest-risk tool. This is deliberately independent of how well-built the server is - a competent, well-provenanced server that executes shell commands is still *inherently* dangerous to connect, the same way a valid TLS certificate can't earn an A on a weak protocol. The classification is surfaced prominently on every report so a reader sees *how dangerous the server's actions are* separately from *how trustworthy its provenance is*. (Whether this becomes a formal second scoring axis - "Trust A / Capability Risk Critical → Overall C" - is under consideration; today it is reported and constrains, but does not by itself set, the grade.)
   *Verified by:* `capabilities.tool-surface` (maps detected capabilities to the matrix).
@@ -83,7 +85,9 @@ The reference classification of what a tool can *do*, independent of who wrote i
 | Financial transactions / payments | **Critical** | Direct, irreversible real-world loss. |
 | Identity / credential / permission management | **Critical** | Privilege escalation; compromises the trust system itself. |
 
-**Combination rule (feeds §6).** A read-of-sensitive-data tool *plus* an egress tool is a data-exfiltration pipeline even when each is individually acceptable; the pair is scored above either alone. This is why capability risk is assessed across the whole tool set, not tool by tool.
+**Combination rule (feeds §6).** A read-of-sensitive-data tool *plus* an egress tool is a data-exfiltration pipeline even when each is individually acceptable. Concretely: a server whose tool set combines "read private/user/org data" with "send external messages / outbound network / webhooks" escalates to **Critical** and fails §2 outright, regardless of either capability's individual rating. This is a floor, not a ceiling: any pairing that already includes a Critical-rated capability on its own (process execution, financial transactions, identity/permission management) fails via that capability alone, without needing a second one. This is why capability risk is assessed across the whole tool set, not tool by tool.
+
+**Automation coverage today.** The scoring model pattern-matches four capability classes: process execution, filesystem write/delete, network egress, and credential/environment-variable access. Three matrix rows have no dedicated detector yet: financial transactions and identity/permission management (both Critical), and "read private / user / org data" (Medium). The practical consequence for the combination rule: its automated trigger today is the credential-access + egress pairing, the nearest detectable proxy for reading private data. The full read-private-plus-egress rule as written requires a detector for the Medium row and remains manual until one exists.
 
 *References:* Anthropic ZT Part III ("Permission models," least agency; sandboxing as table stakes); OWASP MCP Top 10 (excessive permissions / over-privileged access); NSA MCP guidance; MCP spec Security Best Practices. The matrix is to MCP capabilities what a CVSS attack-surface rating is to a CVE: a shared vocabulary for *how dangerous the action is*, before asking how likely it is to be abused.
 
@@ -93,8 +97,8 @@ The reference classification of what a tool can *do*, independent of who wrote i
 
 - **§3.1 Transport security.** Remote endpoints are HTTPS-only with valid TLS.
   *Verified by:* `transport.https`
-- **§3.2 Authentication required.** Remote servers reject unauthenticated requests (401 with `WWW-Authenticate`) rather than serving tools anonymously. <!-- TODO (author pass): note the legitimate-public-server exception (docs servers etc.) and how it's scored -->
-  *Verified by:* `transport.auth-required`
+- **§3.2 Authentication required.** Remote servers reject unauthenticated requests (401 with `WWW-Authenticate`) rather than serving tools anonymously. The legitimate-public-server case (documentation lookups, read-only reference data) is scored by consequence, not by claimed intent: an unauthenticated server whose tool surface rates Low under the §2 Capability Risk Matrix (read public, non-sensitive data) is warned, not failed. An unauthenticated server rating Medium or higher (private data, writes, egress, execution) is failed outright: anonymous access to a capability that matters is the plainest violation of this requirement, not a softer version of it. If the tool surface is unverifiable, the stricter branch applies: an unauthenticated server whose capabilities cannot be inspected is failed, since the public-read-only exception is a claim the server must be able to demonstrate.
+  *Verified by:* `transport.auth-required`, severity gated on `capabilities.tool-surface`
 - **§3.3 OAuth 2.1 conformance.** Remote servers publish protected-resource metadata (`/.well-known/oauth-protected-resource`) and follow the June 2025 authorization spec, including RFC 8707 resource indicators binding tokens to the specific server.
   *Verified by:* `transport.oauth-metadata`
 - **§3.4 Credential handling (stdio).** *(Manual.)* Local servers document which environment credentials they read and why; secrets are scoped, not repurposed org-wide tokens.
@@ -134,8 +138,9 @@ The reference classification of what a tool can *do*, independent of who wrote i
 
 **Intent.** Individually safe tools compose into unsafe systems: a file-reader plus an outbound-network tool is an exfiltration pipeline; a browser tool plus shell access is remote code execution. Risk assessment that stops at individual tools misses the failure mode that actually compromises agents - the documented email-exfiltration attack worked by *combining* two tools, neither of which was individually malicious.
 
-- **§6.1 Combination review.** *(Manual - not yet automatically verified; automation is on the scoring model roadmap.)* Before adoption, enumerate the crossing of this server's capabilities with those of already-connected servers: read-capability × write/send-capability pairs deserve explicit sign-off.
-- **§6.2 Blast-radius containment.** *(Manual.)* Agents connecting this server run with sandboxing and egress controls appropriate to the combined tool surface, not just this server's own.
+- **§6.1 Combination review.** Within a single server, this is already covered by §2's combination rule: a read-private-data-plus-egress pairing on one server fails §2 outright, automatically. What remains manual is the *cross-server* case: enumerating this server's capabilities against every other server already connected to the same agent, since no single-server scan can see an agent's full connected set. Read-capability × write/send-capability pairs across servers deserve explicit sign-off.
+  *Verified by:* `capabilities.tool-surface` (single-server case, via §2's combination rule). *Manual* for the cross-server case, and likely to remain so until a multi-server scan exists: which servers you've connected together is a fact about your deployment, not this one server.
+- **§6.2 Blast-radius disclosure.** *(Manual.)* The server's documentation states plainly what its tools can reach and change, so a reviewer can size the sandboxing and egress controls its capability actually requires. This is a fact about whether the server discloses its own blast radius, not a certification of your deployment: how you contain that blast radius is Layer 2 (Deployment & runtime security, see Scope above), not this policy.
 
 *References:* Anthropic ZT Part II (cross-tool attack case) and Part III (sandboxing, least agency); Invariant Labs / Snyk "toxic flows" analysis; NIST COSAiS multi-agent overlay (draft).
 

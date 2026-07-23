@@ -230,15 +230,17 @@ async function tryRemoteToolsList(
     let prompts: NamedText[] | undefined;
     if (caps?.prompts) {
       const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 3, method: 'prompts/list' }).catch(() => undefined);
-      if (r?.body?.result && isNamedEntriesResult(r.body.result, 'prompts')) {
-        prompts = r.body.result.prompts.map((p: NamedEntry) => ({ name: p.name, description: p.description }));
+      const promptsResult = r?.body?.result;
+      if (promptsResult && isNamedEntriesResult(promptsResult, 'prompts')) {
+        prompts = promptsResult.prompts!.map((p: NamedEntry) => ({ name: p.name, description: p.description }));
       }
     }
     let resources: NamedText[] | undefined;
     if (caps?.resources) {
       const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 4, method: 'resources/list' }).catch(() => undefined);
-      if (r?.body?.result && isNamedEntriesResult(r.body.result, 'resources')) {
-        resources = r.body.result.resources.map((x: NamedEntry) => ({ name: x.name, description: x.description }));
+      const resourcesResult = r?.body?.result;
+      if (resourcesResult && isNamedEntriesResult(resourcesResult, 'resources')) {
+        resources = resourcesResult.resources!.map((x: NamedEntry) => ({ name: x.name, description: x.description }));
       }
     }
 

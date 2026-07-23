@@ -249,7 +249,7 @@ describe('extractSchemaText', () => {
     let current: Record<string, unknown> = deep;
     for (let i = 0; i < 10; i++) {
       current.properties = { nested: { description: `level ${i + 1}` } };
-      current = current.properties.nested as Record<string, unknown>;
+      current = (current.properties as Record<string, unknown>).nested as Record<string, unknown>;
     }
     const strings = extractSchemaText(deep);
     expect(strings.length).toBeLessThanOrEqual(9);

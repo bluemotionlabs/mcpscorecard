@@ -21,7 +21,7 @@ import type {
   ToolInfo,
   ToolSurface,
 } from '../types.js';
-import { errMsg, fetchWithTimeout } from './provenance.js';
+import { errMsg, fetchWithTimeout } from '../utils.js';
 
 const TARBALL_MAX_BYTES = 10 * 1024 * 1024;
 const MAX_SCANNED_FILES = 400;
@@ -30,9 +30,13 @@ const SOURCE_FILE_RE = /\.(m?[jt]s|cjs|py)$/;
 /** Capability patterns scanned in package source. Public by design. */
 export const RISK_PATTERNS: Array<{ category: RiskCategory; label: string; regex: RegExp }> = [
   { category: 'process-execution', label: 'child process execution', regex: /\b(child_process|execSync|execFile|spawnSync?|subprocess\.(run|Popen|call)|os\.system)\b/ },
+  { category: 'process-execution', label: 'child process module import', regex: /\b(?:import\s.*\bfrom\s*|require\s*\()['"](?:node:)?child_process['"]/ },
   { category: 'process-execution', label: 'dynamic code evaluation', regex: /\b(eval|new Function|vm\.runInNewContext)\s*\(/ },
+  { category: 'process-execution', label: 'vm module import', regex: /\b(?:import\s.*\bfrom\s*|require\s*\()['"](?:node:)?vm['"]/ },
   { category: 'filesystem', label: 'filesystem write/delete', regex: /\bfs(?:\/promises)?[.'"]|\b(writeFileSync?|unlinkSync?|rmSync|rmdirSync?|shutil\.rmtree|os\.remove)\b/ },
+  { category: 'filesystem', label: 'fs module import', regex: /\b(?:import\s.*\bfrom\s*|require\s*\()['"](?:node:)?fs(?:\/promises)?['"]/ },
   { category: 'network-egress', label: 'outbound network calls', regex: /\b(fetch\s*\(|axios|got\s*\(|node:https?|http\.request|requests\.(get|post)|urllib)\b/ },
+  { category: 'network-egress', label: 'http module import', regex: /\b(?:import\s.*\bfrom\s*|require\s*\()['"](?:node:)?https?['"]/ },
   { category: 'credential-access', label: 'credential/env access', regex: /\b(process\.env|os\.environ)\s*[.[][^\s\]]*\b(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/i },
 ];
 
@@ -78,7 +82,7 @@ export async function getToolSurface(ctx: CheckContext): Promise<ToolSurface> {
 export function checkCapabilities(surface: ToolSurface): CheckResult {
   const base = {
     id: 'capabilities.tool-surface',
-    policyRef: '§2.1–§2.2',
+    policyRef: '§2.1–§2.4',
     title: 'Tool surface is inspectable and proportionate',
   };
 
@@ -114,6 +118,10 @@ export function checkCapabilities(surface: ToolSurface): CheckResult {
   }
 
   const dangerous = categories.has('process-execution');
+  // Policy §2 automation note: credential-access is the detectable proxy for
+  // "read private data"; paired with egress it fails §2 / feeds §6.1.
+  const toxicReadEgress =
+    categories.has('credential-access') && categories.has('network-egress');
   const combo = categories.size;
 
   if (combo === 0) {
@@ -127,17 +135,64 @@ export function checkCapabilities(surface: ToolSurface): CheckResult {
       evidence,
     };
   }
-  // Shell execution, or read+send combinations (§6's toxic-flow precursor), get the strongest flag.
-  const status = dangerous || combo >= 3 ? 'fail' : 'warn';
+
+  const status = dangerous || toxicReadEgress || combo >= 3 ? 'fail' : 'warn';
+  const comboNote = toxicReadEgress
+    ? ' Credential-access combined with network egress is a toxic flow (§2 combination rule / §6.1).'
+    : '';
   return {
     ...base,
     status,
-    summary: `High-risk capabilities detected: ${[...categories].join(', ')}. Verify each is essential to the server's stated purpose (§2.3).`,
+    summary: `High-risk capabilities detected: ${[...categories].join(', ')}. Verify each is essential to the server's stated purpose (§2.3).${comboNote}`,
     evidence,
   };
 }
 
 /* ---------------- remote: minimal MCP streamable-HTTP client ---------------- */
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === 'string';
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every(isString);
+}
+
+function isValidToolInfo(v: unknown): v is { name: string; description?: string; inputSchema?: unknown } {
+  if (!isRecord(v)) return false;
+  if (!isString(v.name)) return false;
+  if (v.description !== undefined && !isString(v.description)) return false;
+  return true;
+}
+
+function isToolsListResult(v: unknown): v is { tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> } {
+  if (!isRecord(v)) return false;
+  const tools = v.tools;
+  if (tools === undefined) return true;
+  if (!Array.isArray(tools)) return false;
+  return tools.every(isValidToolInfo);
+}
+
+interface NamedEntry {
+  name: string;
+  description?: string;
+}
+
+function isValidNamedEntry(v: unknown): v is NamedEntry {
+  if (!isRecord(v)) return false;
+  return isString(v.name);
+}
+
+function isNamedEntriesResult(v: unknown, key: string): v is Record<string, NamedEntry[]> {
+  if (!isRecord(v)) return false;
+  const list = v[key];
+  if (!Array.isArray(list)) return false;
+  return list.every(isValidNamedEntry);
+}
 
 async function tryRemoteToolsList(
   ctx: CheckContext,
@@ -163,14 +218,9 @@ async function tryRemoteToolsList(
     if (initRes.status === 401 || initRes.status === 403) return { authRequired: true };
     if (!initRes.ok) return {};
 
-    // The initialize result carries an optional `instructions` string the spec
-    // permits clients to inject into the system prompt - a model-facing surface
-    // that gets poison-scanned like a tool description (§5).
-    const initResult = initRes.body?.result as
-      | { instructions?: unknown; capabilities?: { prompts?: unknown; resources?: unknown } }
-      | undefined;
-    const instructions = typeof initResult?.instructions === 'string' ? initResult.instructions : undefined;
-    const caps = initResult?.capabilities;
+    const initResult = isRecord(initRes.body?.result) ? initRes.body!.result : undefined;
+    const instructions = isString(initResult?.instructions) ? initResult!.instructions : undefined;
+    const caps = isRecord(initResult?.capabilities) ? initResult!.capabilities : undefined;
 
     const sessionId = initRes.response.headers.get('mcp-session-id') ?? undefined;
     await rpc(ctx, url, sessionId, { jsonrpc: '2.0', method: 'notifications/initialized' }).catch(() => undefined);
@@ -180,20 +230,24 @@ async function tryRemoteToolsList(
     let prompts: NamedText[] | undefined;
     if (caps?.prompts) {
       const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 3, method: 'prompts/list' }).catch(() => undefined);
-      const list = (r?.body?.result as { prompts?: Array<{ name?: string; description?: string }> } | undefined)?.prompts;
-      if (list) prompts = list.map((p) => ({ name: p.name ?? '', description: p.description }));
+      const promptsResult = r?.body?.result;
+      if (promptsResult && isNamedEntriesResult(promptsResult, 'prompts')) {
+        prompts = promptsResult.prompts!.map((p: NamedEntry) => ({ name: p.name, description: p.description }));
+      }
     }
     let resources: NamedText[] | undefined;
     if (caps?.resources) {
       const r = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 4, method: 'resources/list' }).catch(() => undefined);
-      const list = (r?.body?.result as { resources?: Array<{ name?: string; description?: string }> } | undefined)?.resources;
-      if (list) resources = list.map((x) => ({ name: x.name ?? '', description: x.description }));
+      const resourcesResult = r?.body?.result;
+      if (resourcesResult && isNamedEntriesResult(resourcesResult, 'resources')) {
+        resources = resourcesResult.resources!.map((x: NamedEntry) => ({ name: x.name, description: x.description }));
+      }
     }
 
     const listRes = await rpc(ctx, url, sessionId, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     if (!listRes.ok) return { instructions, prompts, resources };
-    const result = listRes.body?.result as { tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> } | undefined;
-    if (!result?.tools) return { instructions, prompts, resources };
+    const result = listRes.body?.result;
+    if (!result || !isToolsListResult(result) || !result.tools) return { instructions, prompts, resources };
     return {
       tools: result.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
       instructions,
@@ -230,12 +284,26 @@ async function rpc(
 }
 
 function parseFirstSseJson(text: string): { result?: unknown } | undefined {
+  let dataBuffer = '';
   for (const line of text.split('\n')) {
-    if (!line.startsWith('data:')) continue;
-    try {
-      return JSON.parse(line.slice(5).trim()) as { result?: unknown };
-    } catch {
+    if (line.startsWith('data:')) {
+      dataBuffer += (dataBuffer ? '' : '') + line.slice(5).replace(/^ /, '');
       continue;
+    }
+    if (line.trim() === '' && dataBuffer) {
+      try {
+        return JSON.parse(dataBuffer) as { result?: unknown };
+      } catch {
+        dataBuffer = '';
+        continue;
+      }
+    }
+  }
+  if (dataBuffer) {
+    try {
+      return JSON.parse(dataBuffer) as { result?: unknown };
+    } catch {
+      return undefined;
     }
   }
   return undefined;
@@ -298,13 +366,21 @@ async function tryTarballScan(ctx: CheckContext, pkg: string): Promise<TarballSc
         }
       }
     }
+    // Deduplicate hits by category+label+pattern to avoid ballooning evidence.
+    const seen = new Map<string, typeof scan.hits[number]>();
+    for (const hit of scan.hits) {
+      const key = `${hit.category}:${hit.label}:${hit.pattern}`;
+      if (!seen.has(key)) seen.set(key, hit);
+    }
+    scan.hits = [...seen.values()];
     return scan;
   } catch {
     return undefined;
   }
 }
 
-async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<Uint8Array | undefined> {
+/** Exported for testing. */
+export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<Uint8Array | undefined> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   const reader = stream.getReader();
@@ -332,8 +408,8 @@ async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Prom
   return out;
 }
 
-/** Minimal ustar reader - enough for npm tarballs ("package/..." paths). */
-function* iterateTar(bytes: Uint8Array): Generator<{ name: string; data: Uint8Array }> {
+/** Exported for testing. Minimal ustar reader - enough for npm tarballs ("package/..." paths). */
+export function* iterateTar(bytes: Uint8Array): Generator<{ name: string; data: Uint8Array }> {
   let offset = 0;
   while (offset + 512 <= bytes.length) {
     const header = bytes.subarray(offset, offset + 512);
@@ -351,7 +427,8 @@ function* iterateTar(bytes: Uint8Array): Generator<{ name: string; data: Uint8Ar
   }
 }
 
-function readString(bytes: Uint8Array, start: number, length: number): string {
+/** Exported for testing. */
+export function readString(bytes: Uint8Array, start: number, length: number): string {
   const slice = bytes.subarray(start, start + length);
   const end = slice.indexOf(0);
   return new TextDecoder().decode(end === -1 ? slice : slice.subarray(0, end));
@@ -364,9 +441,21 @@ export async function computeToolSchemaHash(tools: ToolInfo[]): Promise<string> 
     [...tools]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((t) => ({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema ?? null })),
+    stableReplacer,
   );
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export { errMsg };
+function stableReplacer(_key: string, value: unknown): unknown {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, k) => {
+        acc[k] = (value as Record<string, unknown>)[k];
+        return acc;
+      }, {});
+  }
+  return value;
+}
+

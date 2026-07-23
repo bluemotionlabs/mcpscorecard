@@ -8,6 +8,7 @@
  */
 
 import type { CheckContext, CheckResult, Evidence } from '../types.js';
+import { errMsg, fetchWithTimeout } from '../utils.js';
 
 const REGISTRY_BASE = 'https://registry.modelcontextprotocol.io';
 /** Commits older than this are a warn; repos are often "done" but agents-facing code rots fast. */
@@ -147,7 +148,8 @@ export async function checkRepoHealth(ctx: CheckContext): Promise<CheckResult> {
   }
 }
 
-function matchesTarget(server: Record<string, unknown>, ctx: CheckContext): boolean {
+/** Exported for testing. */
+export function matchesTarget(server: Record<string, unknown>, ctx: CheckContext): boolean {
   const name = String(server['name'] ?? '').toLowerCase();
   const { registryName, npmPackage, github } = ctx.target;
   if (registryName && name === registryName.toLowerCase()) return true;
@@ -163,16 +165,4 @@ function matchesTarget(server: Record<string, unknown>, ctx: CheckContext): bool
   return false;
 }
 
-export async function fetchWithTimeout(ctx: CheckContext, url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ctx.timeoutMs ?? 10_000);
-  try {
-    return await ctx.fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
-export function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}

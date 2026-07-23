@@ -13,9 +13,13 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "scan": "tsx src/scan.ts"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "tsx": "^4",
     "typescript": "^5",
     "vitest": "^2"
   }

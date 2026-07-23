@@ -17,20 +17,23 @@ import { checkPoisoning } from './checks/poisoning.js';
 import { computeScore } from './scoring.js';
 
 export async function runChecks(ctx: CheckContext): Promise<ScanReport> {
-  const [surface, registryListed, repoHealth, packageHygiene, vulns, transport] = await Promise.all([
-    getToolSurface(ctx),
+  // Tool surface first so §3.2 can gate anonymous-auth severity on capability status.
+  const surface = await getToolSurface(ctx);
+  const capability = checkCapabilities(surface);
+
+  const [registryListed, repoHealth, packageHygiene, vulns, transport] = await Promise.all([
     checkRegistryListed(ctx),
     checkRepoHealth(ctx),
     checkPackageHygiene(ctx),
     checkVulnerabilities(ctx),
-    checkTransport(ctx),
+    checkTransport(ctx, capability.status),
   ]);
 
   const checks: CheckResult[] = [
     registryListed,
     repoHealth,
     packageHygiene,
-    checkCapabilities(surface),
+    capability,
     ...transport,
     vulns,
     checkPoisoning(surface),
@@ -52,10 +55,16 @@ export async function runChecks(ctx: CheckContext): Promise<ScanReport> {
 }
 
 export * from './types.js';
-export { computeScore, CHECK_WEIGHTS, GRADE_BANDS, UNVERIFIABLE_CAPABILITY_CAP } from './scoring.js';
+export {
+  computeScore,
+  CHECK_WEIGHTS,
+  GRADE_BANDS,
+  UNVERIFIABLE_CAPABILITY_CAP,
+  POISONING_FAIL_GRADE,
+} from './scoring.js';
 export { POISON_PATTERNS, checkPoisoning } from './checks/poisoning.js';
 export { RISK_PATTERNS, checkCapabilities, computeToolSchemaHash, getToolSurface } from './checks/capabilities.js';
 export { checkRegistryListed, checkRepoHealth } from './checks/provenance.js';
 export { checkPackageHygiene } from './checks/package-hygiene.js';
 export { checkVulnerabilities } from './checks/vulnerabilities.js';
-export { checkTransport } from './checks/transport.js';
+export { checkTransport, resolveAuthRequiredStatus } from './checks/transport.js';

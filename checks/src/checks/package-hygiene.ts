@@ -8,7 +8,7 @@
  */
 
 import type { CheckContext, CheckResult, Evidence } from '../types.js';
-import { errMsg, fetchWithTimeout } from './provenance.js';
+import { errMsg, fetchWithTimeout } from '../utils.js';
 
 const YOUNG_PACKAGE_DAYS = 30;
 

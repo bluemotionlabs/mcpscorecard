@@ -107,4 +107,34 @@ describe('checkTransport', () => {
     const results = await checkTransport(ctx);
     expect(results.find((r) => r.id === 'transport.oauth-metadata')?.status).toBe('warn');
   });
+
+  it('returns unverifiable when auth probe network errors out', async () => {
+    const fetchImpl = mockFetch([
+      { match: '/mcp', response: () => { throw new Error('ECONNREFUSED'); } },
+      { match: 'oauth-protected-resource', response: textResponse(404) },
+    ]);
+    const ctx = makeCtx({ remoteUrl: 'https://example.com/mcp' }, fetchImpl);
+    const results = await checkTransport(ctx);
+    expect(results.find((r) => r.id === 'transport.auth-required')?.status).toBe('unverifiable');
+  });
+
+  it('returns unverifiable when oauth-metadata endpoint errors out', async () => {
+    const fetchImpl = mockFetch([
+      { match: '/mcp', response: textResponse(401, '', { 'www-authenticate': 'Bearer' }) },
+      { match: 'oauth-protected-resource', response: () => { throw new Error('ENOTFOUND'); } },
+    ]);
+    const ctx = makeCtx({ remoteUrl: 'https://example.com/mcp' }, fetchImpl);
+    const results = await checkTransport(ctx);
+    expect(results.find((r) => r.id === 'transport.oauth-metadata')?.status).toBe('unverifiable');
+  });
+
+  it('fails on anonymous access when capability status is unverifiable', async () => {
+    const fetchImpl = mockFetch([
+      { match: '/mcp', response: jsonResponse(200, { ok: true }) },
+      { match: 'oauth-protected-resource', response: textResponse(404) },
+    ]);
+    const ctx = makeCtx({ remoteUrl: 'https://example.com/mcp' }, fetchImpl);
+    const results = await checkTransport(ctx, 'unverifiable');
+    expect(results.find((r) => r.id === 'transport.auth-required')?.status).toBe('fail');
+  });
 });

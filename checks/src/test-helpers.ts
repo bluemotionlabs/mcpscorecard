@@ -51,14 +51,19 @@ export function textResponse(status: number, body = '', headers: Record<string, 
 export function mockFetch(
   routes: Array<{
     match: string | RegExp;
+    exact?: boolean;
     response: Response | ((url: string, init?: RequestInit) => Response | Promise<Response>);
   }>,
 ): typeof globalThis.fetch {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     for (const route of routes) {
-      const ok =
-        typeof route.match === 'string' ? url.includes(route.match) : route.match.test(url);
+      let ok: boolean;
+      if (route.exact) {
+        ok = typeof route.match === 'string' ? url === route.match : route.match.test(url);
+      } else {
+        ok = typeof route.match === 'string' ? url.includes(route.match) : route.match.test(url);
+      }
       if (!ok) continue;
       return typeof route.response === 'function' ? route.response(url, init) : route.response;
     }
@@ -72,6 +77,9 @@ export function allPassChecks(overrides: Partial<Record<string, CheckStatus>> = 
     'provenance.repo-health',
     'provenance.package-hygiene',
     'capabilities.tool-surface',
+    'transport.https',
+    'transport.auth-required',
+    'transport.oauth-metadata',
     'vulns.osv',
     'poisoning.patterns',
   ] as const;

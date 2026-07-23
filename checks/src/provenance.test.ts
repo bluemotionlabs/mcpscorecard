@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRegistryListed, checkRepoHealth } from './checks/provenance.js';
+import { checkRegistryListed, checkRepoHealth, matchesTarget } from './checks/provenance.js';
 import { checkPackageHygiene } from './checks/package-hygiene.js';
 import { jsonResponse, makeCtx, mockFetch, textResponse } from './test-helpers.js';
 
@@ -56,6 +56,32 @@ describe('checkRegistryListed', () => {
     const ctx = makeCtx({ npmPackage: '@acme/weather' }, fetchImpl);
     const res = await checkRegistryListed(ctx);
     expect(res.status).toBe('unverifiable');
+  });
+
+  it('falls back to bare name when package name includes scope and prefixes', async () => {
+    const fetchImpl = mockFetch([
+      {
+        match: 'registry.modelcontextprotocol.io',
+        response: () => jsonResponse(200, { servers: [] }),
+      },
+    ]);
+    const ctx = makeCtx({ npmPackage: '@scope/mcp-server-filesystem' }, fetchImpl);
+    const res = await checkRegistryListed(ctx);
+    expect(res.status).toBe('warn');
+  });
+
+  it('matches by GitHub owner/repo in registry entry', async () => {
+    const fetchImpl = mockFetch([
+      {
+        match: 'registry.modelcontextprotocol.io',
+        response: () => jsonResponse(200, {
+          servers: [{ server: { name: 'io.github.acme/weather', packages: [] } }],
+        }),
+      },
+    ]);
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'weather' } }, fetchImpl);
+    const res = await checkRegistryListed(ctx);
+    expect(res.status).toBe('pass');
   });
 });
 
@@ -125,6 +151,96 @@ describe('checkRepoHealth', () => {
     const ctx = makeCtx({ github: { owner: 'acme', repo: 'x' } }, fetchImpl);
     const res = await checkRepoHealth(ctx);
     expect(res.status).toBe('unverifiable');
+  });
+
+  it('warns when last push is stale (>365 days)', async () => {
+    const oldDate = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const fetchImpl = mockFetch([
+      {
+        match: '/community/profile',
+        response: jsonResponse(200, { files: { security: { url: 'https://…' } } }),
+      },
+      {
+        match: 'api.github.com/repos/acme/stale',
+        response: jsonResponse(200, {
+          archived: false,
+          pushed_at: oldDate,
+          stargazers_count: 3,
+          license: { spdx_id: 'MIT' },
+          html_url: 'https://github.com/acme/stale',
+        }),
+      },
+    ]);
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'stale' } }, fetchImpl);
+    const res = await checkRepoHealth(ctx);
+    expect(res.status).toBe('warn');
+  });
+
+  it('warns when repo has no license', async () => {
+    const fetchImpl = mockFetch([
+      {
+        match: '/community/profile',
+        response: jsonResponse(200, { files: { security: { url: 'https://…' } } }),
+      },
+      {
+        match: 'api.github.com/repos/acme/nolicense',
+        response: jsonResponse(200, {
+          archived: false,
+          pushed_at: new Date().toISOString(),
+          stargazers_count: 3,
+          license: null,
+          html_url: 'https://github.com/acme/nolicense',
+        }),
+      },
+    ]);
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'nolicense' } }, fetchImpl);
+    const res = await checkRepoHealth(ctx);
+    expect(res.status).toBe('warn');
+  });
+
+  it('warns when SECURITY.md is absent', async () => {
+    const fetchImpl = mockFetch([
+      {
+        match: '/community/profile',
+        response: jsonResponse(200, { files: {} }),
+      },
+      {
+        match: 'api.github.com/repos/acme/nosec',
+        response: jsonResponse(200, {
+          archived: false,
+          pushed_at: new Date().toISOString(),
+          stargazers_count: 5,
+          license: { spdx_id: 'MIT' },
+          html_url: 'https://github.com/acme/nosec',
+        }),
+      },
+    ]);
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'nosec' } }, fetchImpl);
+    const res = await checkRepoHealth(ctx);
+    expect(res.status).toBe('warn');
+  });
+
+  it('fails when two or more health problems exist (stale + no license)', async () => {
+    const oldDate = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const fetchImpl = mockFetch([
+      {
+        match: '/community/profile',
+        response: jsonResponse(200, { files: { security: { url: 'https://…' } } }),
+      },
+      {
+        match: 'api.github.com/repos/acme/dead',
+        response: jsonResponse(200, {
+          archived: false,
+          pushed_at: oldDate,
+          stargazers_count: 1,
+          license: null,
+          html_url: 'https://github.com/acme/dead',
+        }),
+      },
+    ]);
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'dead' } }, fetchImpl);
+    const res = await checkRepoHealth(ctx);
+    expect(res.status).toBe('fail');
   });
 });
 
@@ -223,5 +339,127 @@ describe('checkPackageHygiene', () => {
     );
     const res = await checkPackageHygiene(ctx);
     expect(res.status).toBe('pass');
+  });
+
+  it('warns when package is younger than 30 days', async () => {
+    const created = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    const fetchImpl = mockFetch([
+      {
+        match: 'registry.npmjs.org',
+        response: jsonResponse(200, {
+          'dist-tags': { latest: '1.0.0' },
+          time: { created },
+          versions: {
+            '1.0.0': {
+              repository: { url: 'git+https://github.com/acme/pkg.git' },
+              dist: { attestations: { url: 'https://…' } },
+            },
+          },
+          repository: { url: 'git+https://github.com/acme/pkg.git' },
+        }),
+      },
+      { match: 'api.npmjs.org/downloads', response: jsonResponse(200, { downloads: 10 }) },
+    ]);
+    const ctx = makeCtx(
+      { npmPackage: '@acme/pkg', github: { owner: 'acme', repo: 'pkg' } },
+      fetchImpl,
+    );
+    const res = await checkPackageHygiene(ctx);
+    expect(res.status).toBe('warn');
+    expect(res.summary).toContain('Minor integrity gaps');
+  });
+
+  it('fails when repo field does not match source and attestation is also absent', async () => {
+    const created = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const fetchImpl = mockFetch([
+      {
+        match: 'registry.npmjs.org',
+        response: jsonResponse(200, {
+          'dist-tags': { latest: '1.0.0' },
+          time: { created },
+          versions: {
+            '1.0.0': {
+              repository: { url: 'git+https://github.com/other/wrong.git' },
+              dist: {},
+            },
+          },
+          repository: { url: 'git+https://github.com/other/wrong.git' },
+        }),
+      },
+      { match: 'api.npmjs.org/downloads', response: jsonResponse(200, { downloads: 500 }) },
+    ]);
+    const ctx = makeCtx(
+      { npmPackage: '@acme/pkg', github: { owner: 'acme', repo: 'pkg' } },
+      fetchImpl,
+    );
+    const res = await checkPackageHygiene(ctx);
+    expect(res.status).toBe('fail');
+    expect(res.summary).toContain('Integrity concerns');
+  });
+
+  it('is resilient to downloads API failure', async () => {
+    const created = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const fetchImpl = mockFetch([
+      {
+        match: 'registry.npmjs.org',
+        response: jsonResponse(200, {
+          'dist-tags': { latest: '2.0.0' },
+          time: { created },
+          versions: {
+            '2.0.0': {
+              repository: { url: 'git+https://github.com/acme/pkg.git' },
+              dist: { attestations: { url: 'https://…' } },
+            },
+          },
+          repository: { url: 'git+https://github.com/acme/pkg.git' },
+        }),
+      },
+      { match: 'api.npmjs.org/downloads', response: textResponse(500) },
+    ]);
+    const ctx = makeCtx(
+      { npmPackage: '@acme/pkg', github: { owner: 'acme', repo: 'pkg' } },
+      fetchImpl,
+    );
+    const res = await checkPackageHygiene(ctx);
+    expect(res.status).toBe('pass');
+    expect(res.evidence.some((e) => e.label === 'Weekly downloads' && e.value === 'unknown')).toBe(true);
+  });
+});
+
+describe('matchesTarget', () => {
+  it('matches exact registry name', () => {
+    const ctx = makeCtx({ registryName: 'io.github.acme/server' }, async () => textResponse(500));
+    expect(matchesTarget({ name: 'io.github.acme/server' }, ctx)).toBe(true);
+  });
+
+  it('is case-insensitive for registry name', () => {
+    const ctx = makeCtx({ registryName: 'io.github.acme/server' }, async () => textResponse(500));
+    expect(matchesTarget({ name: 'IO.GITHUB.ACME/SERVER' }, ctx)).toBe(true);
+  });
+
+  it('matches by github owner/repo in server name', () => {
+    const ctx = makeCtx({ github: { owner: 'acme', repo: 'server' } }, async () => textResponse(500));
+    expect(matchesTarget({ name: 'io.github.acme/server' }, ctx)).toBe(true);
+  });
+
+  it('matches by npm package in packages list', () => {
+    const ctx = makeCtx({ npmPackage: '@acme/server' }, async () => textResponse(500));
+    expect(matchesTarget({
+      name: 'something-else',
+      packages: [{ registryType: 'npm', identifier: '@acme/server' }],
+    }, ctx)).toBe(true);
+  });
+
+  it('matches by npm package with registry_type field', () => {
+    const ctx = makeCtx({ npmPackage: '@acme/server' }, async () => textResponse(500));
+    expect(matchesTarget({
+      name: 'x',
+      packages: [{ registry_type: 'npm', name: '@acme/server' }],
+    }, ctx)).toBe(true);
+  });
+
+  it('returns false when nothing matches', () => {
+    const ctx = makeCtx({ npmPackage: '@acme/server' }, async () => textResponse(500));
+    expect(matchesTarget({ name: 'io.github.other/stuff', packages: [] }, ctx)).toBe(false);
   });
 });

@@ -5,7 +5,7 @@
  */
 
 import type { CheckContext, CheckResult, Evidence } from '../types.js';
-import { errMsg, fetchWithTimeout } from './provenance.js';
+import { errMsg, fetchWithTimeout } from '../utils.js';
 
 export async function checkVulnerabilities(ctx: CheckContext): Promise<CheckResult> {
   const base = {
@@ -18,11 +18,29 @@ export async function checkVulnerabilities(ctx: CheckContext): Promise<CheckResu
     return { ...base, status: 'info', summary: 'No package to query (remote-only server).', evidence: [] };
   }
 
+  let latestVersion: string | undefined;
+  try {
+    const metaRes = await fetchWithTimeout(ctx, `https://registry.npmjs.org/${encodeURIComponent(pkg)}`);
+    if (metaRes.ok) {
+      const meta = (await metaRes.json()) as { 'dist-tags'?: Record<string, string> };
+      latestVersion = meta['dist-tags']?.latest;
+    }
+  } catch {
+    // version lookup is best-effort; fall back to package-name-only OSV query
+  }
+
+  const queryBody: { package: { name: string; ecosystem: string; version?: string } } = {
+    package: { name: pkg, ecosystem: 'npm' },
+  };
+  if (latestVersion) {
+    queryBody.package.version = latestVersion;
+  }
+
   try {
     const res = await fetchWithTimeout(ctx, 'https://api.osv.dev/v1/query', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ package: { name: pkg, ecosystem: 'npm' } }),
+      body: JSON.stringify(queryBody),
     });
     if (!res.ok) {
       return { ...base, status: 'unverifiable', summary: `OSV.dev error (HTTP ${res.status}).`, evidence: [] };
@@ -30,8 +48,9 @@ export async function checkVulnerabilities(ctx: CheckContext): Promise<CheckResu
     const body = (await res.json()) as { vulns?: Array<{ id: string; summary?: string }> };
     const vulns = body.vulns ?? [];
 
+    const summaryVersion = latestVersion ? ` @${latestVersion}` : '';
     if (vulns.length === 0) {
-      return { ...base, status: 'pass', summary: 'No advisories on record for this package.', evidence: [] };
+      return { ...base, status: 'pass', summary: `No advisories on record for ${pkg}${summaryVersion}.`, evidence: [] };
     }
     const evidence: Evidence[] = vulns.slice(0, 10).map((v) => ({
       label: v.id,
@@ -41,7 +60,7 @@ export async function checkVulnerabilities(ctx: CheckContext): Promise<CheckResu
     return {
       ...base,
       status: 'fail',
-      summary: `${vulns.length} advisory(ies) on record - review whether the evaluated version is affected.`,
+      summary: `${vulns.length} advisory(ies) on record for ${pkg}${summaryVersion} - review whether the evaluated version is affected.`,
       evidence,
     };
   } catch (err) {

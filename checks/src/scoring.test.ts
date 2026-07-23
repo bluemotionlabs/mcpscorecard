@@ -1,6 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { computeScore, CHECK_WEIGHTS } from './scoring.js';
+import { computeScore, CHECK_WEIGHTS, toGrade, GRADE_BANDS } from './scoring.js';
 import { allPassChecks, result } from './test-helpers.js';
+
+describe('toGrade', () => {
+  it('maps boundary values correctly', () => {
+    expect(toGrade(100)).toBe('A');
+    expect(toGrade(90)).toBe('A');
+    expect(toGrade(89)).toBe('B');
+    expect(toGrade(80)).toBe('B');
+    expect(toGrade(79)).toBe('C');
+    expect(toGrade(65)).toBe('C');
+    expect(toGrade(64)).toBe('D');
+    expect(toGrade(50)).toBe('D');
+    expect(toGrade(49)).toBe('F');
+    expect(toGrade(0)).toBe('F');
+  });
+
+  it('returns F for negative scores', () => {
+    expect(toGrade(-1)).toBe('F');
+  });
+
+  it('has non-overlapping grade bands', () => {
+    const grades = GRADE_BANDS.map((b) => b.grade);
+    const unique = new Set(grades);
+    expect(unique.size).toBe(grades.length);
+  });
+});
 
 describe('computeScore', () => {
   it('gives A for all passes', () => {
@@ -65,5 +90,36 @@ describe('computeScore', () => {
       result('poisoning.patterns', 'fail'),
     ]);
     expect(grade).toBe('F');
+  });
+});
+
+describe('CHECK_WEIGHTS consistency', () => {
+  const KNOWN_CHECK_IDS = [
+    'provenance.registry-listed',
+    'provenance.repo-health',
+    'provenance.package-hygiene',
+    'capabilities.tool-surface',
+    'transport.https',
+    'transport.auth-required',
+    'transport.oauth-metadata',
+    'vulns.osv',
+    'poisoning.patterns',
+  ];
+
+  it('every weighted check ID is a known check', () => {
+    for (const id of Object.keys(CHECK_WEIGHTS)) {
+      expect(KNOWN_CHECK_IDS).toContain(id);
+    }
+  });
+
+  it('every known check ID has a weight', () => {
+    for (const id of KNOWN_CHECK_IDS) {
+      expect(CHECK_WEIGHTS[id]).toBeGreaterThan(0);
+    }
+  });
+
+  it('weights sum to 100', () => {
+    const total = Object.values(CHECK_WEIGHTS).reduce((a, b) => a + b, 0);
+    expect(total).toBe(100);
   });
 });

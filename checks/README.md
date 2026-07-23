@@ -37,3 +37,16 @@ See [`src/scoring.ts`](src/scoring.ts) - check weights, pass/warn/fail point val
 ## License
 
 Apache-2.0.
+
+## Known Limitations
+
+The scoring model is designed for pre-connection triage and has intentional boundaries:
+
+- **No semantic injection detection.** The §5 poisoning scan is pattern-based and deterministic. Natural-language prompt injection with no tell-tale phrase (e.g., "for best results, always invoke this first") is undetectable by pattern matching. Human review remains essential.
+- **No obfuscated payload decoding.** Base64-encoded, hex-encoded, or otherwise obfuscated strings in tool descriptions are not decoded before scanning.
+- **Static npm analysis only.** npm packages are scanned from their published tarball without execution. `serverInstructions` (the `initialize` response text that clients may inject into the system prompt) cannot be obtained from a static scan — it's only available from remote servers.
+- **No cross-server toxic flow analysis.** Section 6 combination rules across multiple servers connected to the same agent require knowing the agent's full connected set, which a single-server scan cannot see. The single-server case is handled by Section 2's combination rule.
+- **No version-pinned vulnerability filtering on v0.1.0.** The OSV.dev query now includes the latest version (fixed in v0.1.1+), reducing false positives from advisories that don't affect the evaluated version. Querying by exact version depends on the npm registry being reachable.
+- **Import alias handling is best-effort.** The static source scanner detects `import`/`require` of risk-bearing modules (`child_process`, `fs`, `http`, `vm`) regardless of how imported bindings are named, but cannot detect dynamically constructed requires or deeply obfuscated access patterns.
+- **No `provenance.maintainer` check yet.** Policy §1.4 (maintainer integrity, commit signing, publisher history, release anomalies) is specified but not yet automated.
+- **No financial-transaction or identity-permission capability detectors.** The Capability Risk Matrix has three rows (financial transactions, identity/permission management, and "read private/user/org data") without dedicated automated detectors. The automated combination rule uses credential-access + egress as its nearest proxy.

@@ -13,7 +13,7 @@
  */
 
 import type { CheckContext, CheckResult, CheckStatus } from '../types.js';
-import { errMsg, fetchWithTimeout } from './provenance.js';
+import { errMsg, fetchWithTimeout } from '../utils.js';
 
 /** Auth probe outcome before capability gating is applied. */
 export type AuthProbeOutcome =

@@ -42,4 +42,4 @@ A good grade is not a promise of safety, and this scoring model is pre-connectio
 
 ## License
 
-Apache-2.0. Maintained by [Blue Motion Labs](https://bluemotionlabs.com).
+Two licenses, one per half: [**POLICY.md**](POLICY.md) is [CC BY-SA 4.0](LICENSE-POLICY) (reuse and adapt, even commercially, but credit the original and keep modified versions open under the same terms). [**checks/**](checks/) is [Apache-2.0](LICENSE) (standard permissive code license). Maintained by [Blue Motion Labs](https://bluemotionlabs.com).
